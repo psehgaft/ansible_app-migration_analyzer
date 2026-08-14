@@ -1,0 +1,20 @@
+---
+site:
+  title: "Migration Showroom"
+  start_page: ansible-app-migration-analyzer:ARCHITECTURE:index.adoc
+content:
+  sources:
+    - url: .
+      start_path: workshop/documentation
+ui:
+  bundle:
+    url: https://github.com/rhpds/rhdp_showroom_theme/releases/download/v2.0.2/ui-bundle.zip
+    snapshot: true
+  supplemental_files:
+    - path: .nojekyll
+    - path: ui.yml
+      contents: "static_files: [ .nojekyll ]"
+runtime:
+  cache_dir: ./.cache/antora
+output:
+  dir: ./www

@@ -1,5 +1,5 @@
 ---
-source_code_path: "/path/a/tu/codigo_fuente"
+source_code_path: "/path/to/source_code"
 output_dir: "./output_report"
 wsdl_output_dir: "{{ output_dir }}/wsdls"
 report_file: "{{ output_dir }}/migration_report.html"

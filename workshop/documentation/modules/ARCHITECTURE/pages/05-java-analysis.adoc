@@ -1,0 +1,86 @@
+= 5. Analyze Java applications
+:toc:
+:icons: font
+
+== Select sources and targets
+
+[source,bash]
+----
+mta-cli rules list-sources
+mta-cli rules list-targets
+mta-cli provider list
+----
+
+Do not copy a target blindly from an older guide. Select the target that
+matches the approved modernization path, for example a currently listed EAP,
+Quarkus, or cloud-readiness target.
+
+== Analyze a Maven or Gradle source tree
+
+[source,bash]
+----
+APP_NAME=customer-service
+INPUT="/srv/mta/input/${APP_NAME}"
+OUTPUT="/srv/mta/output/${APP_NAME}-$(date +%Y%m%d-%H%M%S)"
+TARGET='<value-from-mta-cli-rules-list-targets>'
+
+test -d "$INPUT"
+mta-cli analyze \
+  --input "$INPUT" \
+  --output "$OUTPUT" \
+  --target "$TARGET"
+----
+
+Java uses local/containerless analysis by default in MTA 8.2. Maven repository
+access improves dependency resolution. If the project cannot be built, MTA can
+fall back to build-file parsing with lower precision.
+
+== Analyze a JAR, WAR, or EAR
+
+[source,bash]
+----
+INPUT=/srv/mta/input/orders.war
+OUTPUT="/srv/mta/output/orders-war-$(date +%Y%m%d-%H%M%S)"
+TARGET='<value-from-mta-cli-rules-list-targets>'
+
+test -f "$INPUT"
+mta-cli analyze \
+  --input "$INPUT" \
+  --output "$OUTPUT" \
+  --target "$TARGET"
+----
+
+Compiled archives do not always contain enough metadata to reconstruct every
+dependency. Prefer source analysis when source and build descriptors are
+available; use binary analysis to supplement portfolio evidence.
+
+== Run Java in container mode
+
+Use container mode when policy requires an isolated provider runtime or for a
+disconnected-image workflow:
+
+[source,bash]
+----
+mta-cli analyze \
+  --run-local=false \
+  --input "$INPUT" \
+  --output "$OUTPUT" \
+  --target "$TARGET"
+----
+
+Confirm `podman login registry.redhat.io` before the first run.
+
+== Re-run intentionally
+
+[source,bash]
+----
+mta-cli analyze \
+  --overwrite \
+  --input "$INPUT" \
+  --output "$OUTPUT" \
+  --target "$TARGET"
+----
+
+`--overwrite` replaces the existing output. For auditability, prefer a
+timestamped output directory and record the CLI version, target, source commit,
+and command used for each run.

@@ -1,0 +1,95 @@
+= 6. Analyze C#/.NET applications
+:toc:
+:icons: font
+
+== Understand the provider
+
+MTA 8.2 can analyze .NET applications written in C# with the external
+`csharp` provider in source-only mode. The provider supports SDK-style
+projects and older .NET Framework projects. It looks for a `.sln` first and
+then a `.csproj` when no solution file is available.
+
+Non-Java providers run in container mode. The C# provider bundles the .NET SDK
+used for compilation, so a host `dotnet-sdk` RPM is not a prerequisite for the
+MTA CLI flow documented here.
+
+== Prepare the source tree
+
+[source,bash]
+----
+APP_NAME=legacy-payments
+INPUT="/srv/mta/input/${APP_NAME}"
+OUTPUT="/srv/mta/output/${APP_NAME}-csharp-$(date +%Y%m%d-%H%M%S)"
+
+find "$INPUT" -maxdepth 3 -type f \
+  \( -name '*.sln' -o -name '*.csproj' -o -name 'packages.config' \) -print
+----
+
+For .NET Framework projects in disconnected environments, include required
+DLLs under the project's `packages/` or `lib/` directories. In connected
+environments, allow access to the approved NuGet feed so the provider can run
+dependency restoration.
+
+== Confirm the installed provider name
+
+[source,bash]
+----
+mta-cli provider list
+----
+
+Verify that `csharp` is present before starting. If the provider is absent,
+confirm that the installed archive is MTA 8.2 and that the correct
+architecture-specific package was used.
+
+== Select or create C# rules
+
+MTA rules determine what becomes an incident. List built-in sources and
+targets first:
+
+[source,bash]
+----
+mta-cli rules list-sources
+mta-cli rules list-targets
+----
+
+If the required C# migration path is not represented by built-in rules, obtain
+an organization-approved ruleset that uses the `csharp.referenced` capability,
+place it under `/srv/mta/rules/<ruleset-name>`, and test it:
+
+[source,bash]
+----
+RULESET=/srv/mta/rules/csharp-modernization
+test -d "$RULESET"
+mta-cli rules test "$RULESET"
+----
+
+Do not treat a provider-only run with no relevant rules as a complete migration
+assessment.
+
+== Run the analysis
+
+[source,bash]
+----
+mta-cli analyze \
+  --run-local=false \
+  --provider csharp \
+  --input "$INPUT" \
+  --output "$OUTPUT" \
+  --rules "$RULESET"
+----
+
+If approved built-in rules cover the intended path, use the corresponding
+`--source` and `--target` values instead of an unrelated custom ruleset. Keep
+the explicit `--provider csharp` selection so unsupported languages in a mixed
+repository do not make provider detection fail.
+
+== Mixed solutions
+
+For a solution containing both `.cs` and `.vb` projects:
+
+. Copy or check out the complete solution so project references remain valid.
+. Point the C# run at a C#-only subtree or solution when practical.
+. Record excluded `.vbproj` projects in the assessment scope.
+. Run the Visual Basic fallback described in the next module.
+. Combine findings only at the portfolio level; keep evidence provenance
+  separate.

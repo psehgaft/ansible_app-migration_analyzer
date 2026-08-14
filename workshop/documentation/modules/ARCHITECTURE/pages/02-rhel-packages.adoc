@@ -1,0 +1,85 @@
+= 2. Install RHEL packages
+:toc:
+:icons: font
+
+== Detect the major release
+
+[source,bash]
+----
+source /etc/os-release
+RHEL_MAJOR="${VERSION_ID%%.*}"
+printf 'RHEL major version: %s\n' "$RHEL_MAJOR"
+----
+
+The following procedure supports RHEL 8, 9, and 10. Stop if the detected value
+is outside that set.
+
+[source,bash]
+----
+case "$RHEL_MAJOR" in
+  8|9|10) ;;
+  *) echo "Unsupported RHEL major version: $RHEL_MAJOR" >&2; exit 1 ;;
+esac
+----
+
+== Update metadata and install base tools
+
+[source,bash]
+----
+sudo dnf -y makecache
+sudo dnf -y install \
+  ca-certificates curl git jq openssl procps-ng tar unzip which \
+  findutils gzip shadow-utils python3 ansible-core
+----
+
+`ansible-core` and `python3` are required by the repository's Visual Basic
+fallback analyzer. They are not required for a Java-only MTA server.
+
+== Install container tools
+
+MTA non-Java analysis runs only in container mode. Install Podman even if Java
+will initially run in containerless mode.
+
+=== RHEL 8
+
+Use the RHEL 8 `container-tools` module stream:
+
+[source,bash]
+----
+sudo dnf -y module reset container-tools
+sudo dnf -y module install container-tools:rhel8
+----
+
+If a Satellite content view exposes `container-tools` as regular packages
+instead, follow the content-view policy and use `sudo dnf install -y
+container-tools`.
+
+=== RHEL 9 and RHEL 10
+
+[source,bash]
+----
+sudo dnf -y install container-tools
+----
+
+== Validate Podman
+
+[source,bash]
+----
+podman --version
+podman info --format '{{.Host.OCIRuntime.Name}}'
+podman run --rm registry.access.redhat.com/ubi9/ubi-minimal true
+----
+
+Run provider containers as the unprivileged analysis user. Do not run MTA as
+root unless a documented environmental constraint requires it.
+
+== Registry authentication
+
+[source,bash]
+----
+podman login registry.redhat.io
+podman login --get-login registry.redhat.io
+----
+
+The login is not required for Java containerless mode, but it is required when
+MTA must pull Red Hat provider images, including the C# provider.

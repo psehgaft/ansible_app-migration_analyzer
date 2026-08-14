@@ -1,0 +1,80 @@
+= 4. Install and validate MTA CLI
+:toc:
+:icons: font
+
+== Download the correct archive
+
+From the official Red Hat MTA download page, download the MTA 8.2 Linux archive
+that matches the server architecture:
+
+* `mta-8.2.0-cli-linux-amd64.zip` for `x86_64`
+* `mta-8.2.0-cli-linux-arm64.zip` for `aarch64`
+
+The download requires acceptance of Red Hat terms and an authorized account.
+Copy the archive to the RHEL server without renaming its contents.
+
+== Install for one analysis user
+
+[source,bash]
+----
+MTA_VERSION=8.2.0
+case "$(uname -m)" in
+  x86_64) MTA_ARCH=linux-amd64 ;;
+  aarch64) MTA_ARCH=linux-arm64 ;;
+  *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+
+MTA_ZIP="mta-${MTA_VERSION}-cli-${MTA_ARCH}.zip"
+test -s "$MTA_ZIP"
+install -d -m 0755 "$HOME/.kantra"
+unzip -q "$MTA_ZIP" -d "$HOME/.kantra"
+find "$HOME/.kantra" -maxdepth 3 -type f -name mta-cli -print
+----
+
+The archive layout can change between releases. Link the binary returned by
+`find` rather than assuming an extra directory level:
+
+[source,bash]
+----
+MTA_BIN="$(find "$HOME/.kantra" -maxdepth 3 -type f -name mta-cli -print -quit)"
+test -n "$MTA_BIN"
+chmod 0755 "$MTA_BIN"
+install -d -m 0755 "$HOME/.local/bin"
+ln -sfn "$MTA_BIN" "$HOME/.local/bin/mta-cli"
+
+grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" || \
+  printf '%s\n' 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+export PATH="$HOME/.local/bin:$PATH"
+----
+
+== Validate the installation
+
+[source,bash]
+----
+mta-cli version
+mta-cli --help
+mta-cli provider list
+mta-cli rules list-sources
+mta-cli rules list-targets
+----
+
+Use the source and target names displayed by the installed CLI. This prevents
+automation from depending on labels removed or renamed in a later ruleset.
+
+== Smoke-test prerequisites
+
+[source,bash]
+----
+java -version
+javac -version
+mvn --version
+podman --version
+podman login --get-login registry.redhat.io
+test -w /srv/mta/output
+----
+
+[NOTE]
+====
+Java containerless mode does not require registry authentication. C# and all
+other non-Java language analyses require container mode.
+====

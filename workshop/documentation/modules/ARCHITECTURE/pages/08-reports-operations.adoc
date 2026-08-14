@@ -1,0 +1,77 @@
+= 8. Review reports and operate the server
+:toc:
+:icons: font
+
+== Expected MTA output
+
+An analysis output normally includes logs, YAML data, dependency information,
+and a static report directory. Confirm the generated files instead of assuming
+that a successful process exit produced a useful assessment:
+
+[source,bash]
+----
+find "$OUTPUT" -maxdepth 2 -type f -printf '%P\n' | sort
+test -f "$OUTPUT/static-report/index.html"
+----
+
+Review at minimum:
+
+* Technologies and dependencies detected
+* Mandatory and optional issues
+* Incidents and affected source locations
+* Story points or effort estimates
+* Analysis insights
+* Warnings in `analysis.log`, provider logs, and static-report logs
+
+== Serve the static report safely
+
+For local-only access:
+
+[source,bash]
+----
+cd "$OUTPUT/static-report"
+python3 -m http.server 8080 --bind 127.0.0.1
+----
+
+From an administrator workstation, create an SSH tunnel:
+
+[source,bash]
+----
+ssh -L 8080:127.0.0.1:8080 analysis-user@mta-server.example.com
+----
+
+Then open `http://127.0.0.1:8080`. Do not expose the report directly on an
+untrusted network; reports can contain source snippets, dependency names, paths,
+and vulnerability-relevant details.
+
+== Package evidence
+
+[source,bash]
+----
+RUN_DIR="$OUTPUT"
+tar -C "$(dirname "$RUN_DIR")" \
+  -czf "${RUN_DIR}.tar.gz" "$(basename "$RUN_DIR")"
+sha256sum "${RUN_DIR}.tar.gz" > "${RUN_DIR}.tar.gz.sha256"
+----
+
+Record the following beside each run:
+
+* application name and source commit/tag
+* `mta-cli version`
+* operating-system release and architecture
+* provider, ruleset version, source, target, and exact command
+* execution timestamp and analyst
+* archive checksum
+
+== Retention and cleanup
+
+List candidate runs before deleting anything:
+
+[source,bash]
+----
+find /srv/mta/output -mindepth 1 -maxdepth 1 \
+  -type d -mtime +90 -printf '%TY-%Tm-%Td %p\n' | sort
+----
+
+Apply the organization's evidence-retention policy. Never automate recursive
+deletion from an unresolved variable or from `/srv/mta/output` itself.
