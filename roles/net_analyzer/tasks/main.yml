@@ -1,0 +1,52 @@
+---
+- name: Validar que la ruta de origen existe
+  ansible.builtin.stat:
+    path: "{{ source_code_path }}"
+  register: src_path_check
+
+- name: Fallar si la ruta especificada no existe
+  ansible.builtin.fail:
+    msg: "La ruta de codigo fuente '{{ source_code_path }}' no existe."
+  when: not src_path_check.stat.exists
+
+- name: Crear directorios de salida
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ output_dir }}"
+    - "{{ wsdl_output_dir }}"
+
+- name: Ejecutar script de analisis de codigo .NET
+  ansible.builtin.script:
+    cmd: "analyze_code.py '{{ source_code_path }}'"
+  register: raw_analysis_result
+
+- name: Parsear JSON de resultados del analisis
+  ansible.builtin.set_fact:
+    analysis: "{{ raw_analysis_result.stdout | from_json }}"
+
+- name: Copiar archivos WSDL encontrados al directorio de salidas
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ wsdl_output_dir }}/{{ item | basename }}"
+    remote_src: true
+  loop: "{{ analysis.wsdl_files }}"
+  when: analysis.wsdl_files | length > 0
+
+- name: Generar Reporte HTML de Complejidad de Migracion
+  ansible.builtin.template:
+    src: "report.html.j2"
+    dest: "{{ report_file }}"
+    mode: '0644'
+
+- name: Mostrar resumen final en consola
+  ansible.builtin.debug:
+    msg:
+      - "=== ANALISIS COMPLETADO ==="
+      - "Total Clases: {{ analysis.total_classes }}"
+      - "Archivos WSDL Copiados: {{ analysis.wsdl_files | length }}"
+      - "Complejidad a .NET Core: {{ analysis.score_net_core }}"
+      - "Complejidad a Java (Quarkus): {{ analysis.score_quarkus }}"
+      - "Reporte generado en: {{ report_file }}"
