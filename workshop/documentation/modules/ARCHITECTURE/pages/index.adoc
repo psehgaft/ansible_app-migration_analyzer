@@ -1,0 +1,85 @@
+= Migration Showroom: MTA CLI on RHEL 8, 9, and 10
+:toc:
+:icons: font
+
+== Purpose
+
+This learning path configures a Red Hat Enterprise Linux server to run Red Hat
+Migration Toolkit for Applications (MTA) 8.2 from the command line. It covers
+Java source and binaries, C#/.NET source, report handling, repeatable operating
+practices, and the boundary for Visual Basic projects.
+
+The commands use `mta-cli`, the supported MTA 8.2 command structure. Older
+examples such as `mta-cli analyze --list-targets` are deprecated; use
+`mta-cli rules list-targets` instead.
+
+== Learning outcomes
+
+After completing the workshop, you can:
+
+* Prepare RHEL 8, 9, or 10 with the required repositories and packages.
+* Install JDK 17 or later and Maven 3.9.9 or later.
+* Install Podman and authenticate to `registry.redhat.io`.
+* Install the architecture-specific MTA CLI archive.
+* Analyze Java source code, Maven/Gradle projects, JARs, WARs, and EARs.
+* Run the containerized `csharp` provider against a `.sln` or `.csproj` tree.
+* Distinguish native semantic analysis from heuristic Visual Basic inventory.
+* Review and securely transfer the generated static report.
+
+== Support matrix
+
+[cols="1,1,2,2",options="header"]
+|===
+|Workload |Mode |Required runtime |Scope
+
+|Java source
+|Local/containerless or container
+|JDK 17+, Maven 3.9.9+; Podman for container mode
+|Native MTA Java provider
+
+|JAR, WAR, EAR
+|Local or container
+|JDK 17+, Maven 3.9.9+
+|Native MTA Java analysis; dependency precision depends on available metadata
+
+|C#/.NET source
+|Container only
+|Podman and access to `registry.redhat.io`; NuGet access for restore
+|Native MTA `csharp` provider in source-only mode
+
+|Visual Basic/VB.NET source
+|Heuristic fallback
+|Ansible Core and Python 3
+|No native MTA Visual Basic semantic provider is documented in MTA 8.2; use the repository role for inventory and validate findings manually
+|===
+
+[IMPORTANT]
+====
+Do not label the Visual Basic fallback report as a semantic MTA report. For a
+mixed C#/VB solution, analyze the C# projects with MTA and inventory the VB
+projects separately.
+====
+
+== Recommended server size
+
+For a shared analysis host, start with 4 vCPU, 16 GiB RAM, and at least 100 GiB
+of free XFS storage. Increase memory and disk for large repositories, multiple
+applications, local Maven/NuGet caches, and retained reports. The CLI and
+provider containers can use several gigabytes; monitor for out-of-memory events.
+
+== Architecture
+
+[source,text]
+----
+Application source/binary
+        |
+        v
+     mta-cli  ----> Java provider (local or container)
+        |
+        +----> C# provider container ----> NuGet/registry access
+        |
+        v
+ YAML results + logs + static HTML report
+----
+
+Proceed to xref:01-prerequisites.adoc[Plan the server].

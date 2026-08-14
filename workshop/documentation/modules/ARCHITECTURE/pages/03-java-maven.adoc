@@ -1,0 +1,87 @@
+= 3. Install JDK and Maven
+:toc:
+:icons: font
+
+MTA 8.2 requires JDK 17 or later, `JAVA_HOME`, Maven 3.9.9 or later, and the
+Maven binary in `PATH`.
+
+== Install OpenJDK 17
+
+[source,bash]
+----
+sudo dnf -y install java-17-openjdk-devel
+JAVA_BIN="$(readlink -f "$(command -v java)")"
+JAVA_HOME="${JAVA_BIN%/bin/java}"
+printf 'JAVA_HOME=%s\n' "$JAVA_HOME"
+java -version
+javac -version
+----
+
+Persist the setting for all interactive users:
+
+[source,bash]
+----
+sudo tee /etc/profile.d/mta-java.sh >/dev/null <<EOF
+export JAVA_HOME="$JAVA_HOME"
+export PATH="\$JAVA_HOME/bin:\$PATH"
+EOF
+sudo chmod 0644 /etc/profile.d/mta-java.sh
+source /etc/profile.d/mta-java.sh
+----
+
+== Install Maven 3.9.9 or later
+
+The Maven RPM available to a particular RHEL content view might be older than
+the MTA requirement. Check it first:
+
+[source,bash]
+----
+dnf info maven | sed -n '/^Version/p'
+----
+
+If the offered version is 3.9.9 or later, install it with DNF. Otherwise,
+download an Apache Maven 3.9.x binary archive from the Apache Maven download
+page on a trusted workstation and copy it to the server. The example uses
+3.9.11:
+
+[source,bash]
+----
+MAVEN_VERSION=3.9.11
+MAVEN_ARCHIVE="apache-maven-${MAVEN_VERSION}-bin.tar.gz"
+
+# Copy both files from the trusted download workstation first:
+#   $MAVEN_ARCHIVE
+#   $MAVEN_ARCHIVE.sha512
+sha512sum -c "$MAVEN_ARCHIVE.sha512"
+sudo tar -xzf "$MAVEN_ARCHIVE" -C /opt
+sudo ln -sfn "/opt/apache-maven-${MAVEN_VERSION}" /opt/maven
+----
+
+Persist Maven:
+
+[source,bash]
+----
+sudo tee /etc/profile.d/mta-maven.sh >/dev/null <<'EOF'
+export MAVEN_HOME=/opt/maven
+export PATH="$MAVEN_HOME/bin:$PATH"
+EOF
+sudo chmod 0644 /etc/profile.d/mta-maven.sh
+source /etc/profile.d/mta-maven.sh
+mvn --version
+----
+
+Verify that the output shows Maven 3.9.9 or later and Java 17 or later.
+
+== Configure enterprise Maven access
+
+When applications use an internal artifact repository, place the approved
+mirror configuration at `~/.m2/settings.xml`. Keep credentials in a credential
+provider or an environment-specific protected file; never commit them to this
+repository.
+
+[source,bash]
+----
+install -d -m 0700 ~/.m2
+chmod 0600 ~/.m2/settings.xml 2>/dev/null || true
+mvn -q help:effective-settings >/dev/null
+----

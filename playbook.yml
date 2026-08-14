@@ -1,13 +1,13 @@
 ---
-- name: Analizar Complejidad de Migracion de Proyecto .NET / VB
+- name: Analyze .NET and Visual Basic migration complexity
   hosts: localhost
   connection: local
   gather_facts: false
 
   vars:
-    # Puedes cambiar esta ruta al ejecutar con -e "source_code_path=/mi/ruta"
-    source_code_path: "./mi_proyecto_legacy"
-    output_dir: "./reporte_migracion"
+    # Override with -e "source_code_path=/path/to/legacy/source".
+    source_code_path: "./legacy_project"
+    output_dir: "./migration_report"
 
   roles:
     - net_analyzer

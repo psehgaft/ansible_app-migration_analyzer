@@ -1,0 +1,99 @@
+= 9. Troubleshooting
+:toc:
+:icons: font
+
+== Provider image cannot be pulled
+
+[source,bash]
+----
+podman login --get-login registry.redhat.io
+podman login registry.redhat.io
+podman images --format '{{.Repository}}:{{.Tag}}'
+df -h /var/lib/containers "$HOME/.local/share/containers" 2>/dev/null
+----
+
+Validate proxy, firewall, DNS, certificate trust, Red Hat entitlement, and free
+space. Do not disable TLS verification as a permanent workaround.
+
+== Rootless Podman errors
+
+[source,bash]
+----
+id
+grep "^$USER:" /etc/subuid /etc/subgid
+podman info --debug
+loginctl show-user "$USER" -p Linger
+----
+
+If subordinate ID ranges are missing, have an administrator allocate them using
+the organization's identity policy, then run `podman system migrate` as the
+analysis user.
+
+== Java or Maven version is rejected
+
+[source,bash]
+----
+type -a java javac mvn
+readlink -f "$(command -v java)"
+printf 'JAVA_HOME=%s\n' "$JAVA_HOME"
+java -version
+mvn --version
+----
+
+MTA 8.2 requires JDK 17+ and Maven 3.9.9+. Remove stale path entries and reload
+`/etc/profile.d/mta-java.sh` and `/etc/profile.d/mta-maven.sh`.
+
+== NuGet restore fails for C#
+
+Check:
+
+* HTTPS/DNS access to the approved NuGet feed
+* proxy variables passed to the analysis process
+* internal CA trust on the host and inside the provider workflow
+* `NuGet.Config` source names and credentials
+* presence of `packages/` or `lib/` DLLs for disconnected .NET Framework
+  projects
+
+Do not copy personal NuGet credentials into the repository or report archive.
+
+== Output exists
+
+Use a new timestamped directory. If replacement is intentional, add
+`--overwrite` after verifying the resolved output path:
+
+[source,bash]
+----
+realpath -m "$OUTPUT"
+test "${OUTPUT#/srv/mta/output/}" != "$OUTPUT"
+----
+
+== Analysis is slow or terminated
+
+[source,bash]
+----
+free -h
+df -hT /srv/mta /var/lib/containers 2>/dev/null
+podman stats --no-stream
+dmesg -T | grep -Ei 'out of memory|oom|killed process' | tail -50
+----
+
+Analyze one application at a time, exclude generated/vendor directories when
+the CLI/rules allow it, preserve Maven/NuGet caches, and increase RAM or disk
+when evidence shows resource pressure.
+
+== Collect support evidence
+
+[source,bash]
+----
+{
+  cat /etc/redhat-release
+  uname -a
+  mta-cli version
+  java -version
+  mvn --version
+  podman version
+} > /tmp/mta-environment.txt 2>&1
+----
+
+Attach environment metadata and relevant logs, but remove credentials, tokens,
+source code, customer names, and sensitive paths before sharing evidence.

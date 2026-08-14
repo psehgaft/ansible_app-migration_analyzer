@@ -1,0 +1,5 @@
+name: ansible-app-migration-analyzer
+version: main
+title: Migration Showroom
+nav:
+  - modules/ARCHITECTURE/nav.adoc

@@ -1,0 +1,64 @@
+= 7. Handle Visual Basic projects
+:toc:
+:icons: font
+
+== Product boundary
+
+MTA 8.2 documents semantic analysis for .NET applications written in C# using
+the `csharp` provider. It does not document a native Visual Basic or VB.NET
+semantic provider. Do not force `.vb` source through `--provider csharp` and do
+not describe a generic text scan as equivalent to MTA semantic analysis.
+
+== Use the repository fallback analyzer
+
+The `net_analyzer` Ansible role inventories Visual Basic/.NET source and
+produces a heuristic HTML complexity report.
+
+[source,bash]
+----
+cd /opt
+sudo git clone \
+  https://github.com/psehgaft/ansible_app-migration_analyzer.git
+sudo chown -R "$USER":"$(id -gn)" ansible_app-migration_analyzer
+cd ansible_app-migration_analyzer
+
+ansible-playbook playbook.yml \
+  -e "source_code_path=/srv/mta/input/legacy-vb" \
+  -e "output_dir=/srv/mta/output/legacy-vb-heuristic"
+----
+
+Review:
+
+* `migration_report.html`
+* copied WSDL files
+* class inventory
+* .NET Core and Quarkus heuristic scores
+
+== Required manual review for VB/VB.NET
+
+Add a manual assessment for items that a heuristic scan cannot reliably
+resolve:
+
+* `.vbproj` target frameworks and project references
+* COM/ActiveX interop and Windows-only APIs
+* ASP.NET Web Forms, WCF, ASMX, remoting, and Enterprise Services
+* `My.*`, late binding, reflection, and dynamic assembly loading
+* P/Invoke, registry access, Windows services, and scheduled tasks
+* stored procedures, distributed transactions, and proprietary drivers
+* binary-only dependencies and vendor support status
+* authentication, authorization, cryptography, and secrets
+* deployment descriptors, IIS configuration, and operational dependencies
+
+== Evidence statement
+
+Use this statement in the final assessment:
+
+[quote]
+____
+Visual Basic findings were produced by the repository's heuristic Ansible
+analyzer and manual review. They are not native MTA semantic-analysis results.
+C# and Java findings retain their separate MTA report provenance.
+____
+
+For strategic migration decisions, validate the result with application owners
+and a proof of concept before estimating delivery commitments.

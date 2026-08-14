@@ -1,0 +1,12 @@
+* Migration Showroom
+** xref:index.adoc[Overview and support matrix]
+** xref:01-prerequisites.adoc[1. Plan the server]
+** xref:02-rhel-packages.adoc[2. Install RHEL packages]
+** xref:03-java-maven.adoc[3. Install JDK and Maven]
+** xref:04-mta-cli.adoc[4. Install and validate MTA CLI]
+** xref:05-java-analysis.adoc[5. Analyze Java]
+** xref:06-dotnet-analysis.adoc[6. Analyze C#/.NET]
+** xref:07-visual-basic.adoc[7. Handle Visual Basic]
+** xref:08-reports-operations.adoc[8. Reports and operations]
+** xref:09-troubleshooting.adoc[9. Troubleshooting]
+** xref:appendix-reference.adoc[Appendix: commands and references]

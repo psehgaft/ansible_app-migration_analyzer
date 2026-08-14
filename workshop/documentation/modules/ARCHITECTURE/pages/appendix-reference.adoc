@@ -1,0 +1,54 @@
+= Appendix: command and reference sheet
+:toc:
+
+== MTA 8.2 command map
+
+[cols="1,1",options="header"]
+|===
+|Task |Command
+|Show version |`mta-cli version`
+|List providers |`mta-cli provider list`
+|List sources |`mta-cli rules list-sources`
+|List targets |`mta-cli rules list-targets`
+|Test a ruleset |`mta-cli rules test <ruleset-path>`
+|Analyze |`mta-cli analyze --input <path> --output <path> ...`
+|Force container mode |Add `--run-local=false`
+|Select C# provider |Add `--provider csharp`
+|Replace output |Add `--overwrite`
+|Help |`mta-cli <command> --help`
+|===
+
+== Required software
+
+[cols="1,1,2",options="header"]
+|===
+|Software |Required version |Used for
+|RHEL |8, 9, or 10 |Analysis host
+|JDK |17 or later |MTA prerequisite and Java analysis
+|Maven |3.9.9 or later |Java dependency/build analysis
+|Podman/container-tools |RHEL-supported |C# and other containerized providers
+|MTA CLI |8.2.0 in this guide |Analysis command line
+|Python 3 and Ansible Core |RHEL-supported |Repository Visual Basic heuristic fallback
+|===
+
+== Official references
+
+* https://docs.redhat.com/en/documentation/migration_toolkit_for_applications/8.2/html/installing_the_migration_toolkit_for_applications[Installing MTA 8.2]
+* https://docs.redhat.com/en/documentation/migration_toolkit_for_applications/8.2/html/using_the_migration_toolkit_for_applications_command-line_interface[Using the MTA 8.2 CLI]
+* https://docs.redhat.com/en/documentation/migration_toolkit_for_applications/8.2/html/configuring_and_using_rules_for_an_mta_analysis[Configuring and using MTA rules]
+* https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/8/html/building_running_and_managing_containers[Containers on RHEL 8]
+* https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/9/html/building_running_and_managing_containers[Containers on RHEL 9]
+* https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/10/html/building_running_and_managing_containers[Containers on RHEL 10]
+* https://maven.apache.org/download.cgi[Apache Maven downloads]
+
+== Final validation checklist
+
+* [ ] RHEL release and architecture recorded.
+* [ ] JDK 17+ and Maven 3.9.9+ validated.
+* [ ] Rootless Podman validated.
+* [ ] Red Hat registry login validated for container-mode runs.
+* [ ] MTA version, providers, sources, and targets recorded.
+* [ ] Java smoke analysis completed.
+* [ ] C# ruleset selected and tested before C# analysis.
+* [ ] Visual Basic scope and non-MTA provenance documented.
+* [ ] Static report reviewed, checksummed, and stored under policy.

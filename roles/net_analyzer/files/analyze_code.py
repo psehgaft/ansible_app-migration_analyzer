@@ -20,7 +20,7 @@ def analyze_project(source_path):
         }
     }
 
-    # Expresiones regulares para conteo de clases y patrones
+    # Regular expressions for class and pattern counting.
     cs_class_regex = re.compile(r'\b(public|internal|private|protected)?\s*(abstract|sealed|static)?\s*class\s+([A-Za-z0-9_]+)')
     vb_class_regex = re.compile(r'\b(Public|Friend|Private)?\s*(MustInherit|NotInheritable)?\s*Class\s+([A-Za-z0-9_]+)', re.IGNORECASE)
 
@@ -29,7 +29,7 @@ def analyze_project(source_path):
             ext = os.path.splitext(file)[1].lower()
             full_path = os.path.join(root, file)
 
-            # Detectar WSDL
+            # Detect WSDL files.
             if ext == '.wsdl':
                 metrics["wsdl_files"].append(full_path)
                 continue
@@ -49,13 +49,13 @@ def analyze_project(source_path):
                         metrics["total_loc"] += len(lines)
                         content = "".join(lines)
 
-                        # Contar clases
+                        # Count classes.
                         if ext == '.cs':
                             metrics["total_classes"] += len(cs_class_regex.findall(content))
                         else:
                             metrics["total_classes"] += len(vb_class_regex.findall(content))
 
-                        # Detectar patrones de complejidad
+                        # Detect complexity patterns.
                         if "System.Web" in content:
                             metrics["findings"]["system_web_usages"] += 1
                         if "System.ServiceModel" in content:
@@ -68,17 +68,17 @@ def analyze_project(source_path):
                 except Exception:
                     pass
 
-    # Scoring de Complejidad
-    metrics["score_net_core"] = "Bajo"
-    metrics["score_quarkus"] = "Medio"
+    # Complexity scoring.
+    metrics["score_net_core"] = "Low"
+    metrics["score_quarkus"] = "Medium"
 
     if metrics["findings"]["wcf_usages"] > 0 or metrics["findings"]["system_web_usages"] > 5:
-        metrics["score_net_core"] = "Medio"
-        metrics["score_quarkus"] = "Alto"
+        metrics["score_net_core"] = "Medium"
+        metrics["score_quarkus"] = "High"
 
     if metrics["findings"]["aspx_files"] > 0 or metrics["findings"]["win_api_usages"] > 0:
-        metrics["score_net_core"] = "Alto"
-        metrics["score_quarkus"] = "Muy Alto (Reescritura Necesaria)"
+        metrics["score_net_core"] = "High"
+        metrics["score_quarkus"] = "Very High (Rewrite Required)"
 
     return metrics
 

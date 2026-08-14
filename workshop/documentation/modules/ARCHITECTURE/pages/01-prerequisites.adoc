@@ -1,0 +1,80 @@
+= 1. Plan the server
+:toc:
+:icons: font
+
+== Required access
+
+Prepare the following before installation:
+
+* A supported x86_64 or aarch64 RHEL 8, 9, or 10 host.
+* A user with `sudo` access.
+* An active Red Hat subscription or an organization-managed repository mirror.
+* A Red Hat account authorized to download MTA and authenticate to
+  `registry.redhat.io`.
+* Outbound HTTPS access to the Red Hat registry, Maven repositories, NuGet
+  feeds, and the source-control system used by the applications.
+* Application source or binaries copied to a dedicated working directory.
+
+== Resource baseline
+
+[cols="1,1,1",options="header"]
+|===
+|Resource |Minimum lab |Recommended shared host
+|CPU |2 vCPU |4 or more vCPU
+|Memory |8 GiB |16 GiB or more
+|Free disk |30 GiB |100 GiB or more
+|File system |XFS/ext4 |XFS with separate workspace if reports are retained
+|===
+
+== Inspect the host
+
+[source,bash]
+----
+cat /etc/redhat-release
+uname -m
+df -hT
+free -h
+getenforce
+timedatectl status
+----
+
+Supported archive mapping:
+
+[cols="1,1",options="header"]
+|===
+|`uname -m` |MTA archive suffix
+|`x86_64` |`linux-amd64`
+|`aarch64` |`linux-arm64`
+|===
+
+== Register RHEL when required
+
+If the host is not already managed by Satellite or another organizational
+subscription workflow:
+
+[source,bash]
+----
+sudo subscription-manager status
+sudo subscription-manager register
+sudo subscription-manager refresh
+sudo subscription-manager repos --list-enabled
+----
+
+[CAUTION]
+====
+Do not place Red Hat passwords or registry tokens in shell history, scripts,
+Git, or Ansible variables stored as plain text. Use interactive login or your
+organization's secret manager.
+====
+
+== Create an operating layout
+
+[source,bash]
+----
+sudo install -d -m 0755 /opt/mta
+sudo install -d -m 0775 /srv/mta/{input,output,rules,cache}
+sudo chown -R "$USER":"$(id -gn)" /srv/mta
+----
+
+Keep input source read-only where practical. Use a new output directory per run
+or use `--overwrite` only when intentionally replacing a previous result.
