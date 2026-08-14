@@ -1,0 +1,179 @@
+---
+- name: Validate the role configuration
+  ansible.builtin.assert:
+    that:
+      - mta_dotnet_source_path | length > 0
+      - mta_dotnet_output_dir | length > 0
+      - mta_dotnet_provider == 'csharp'
+      - mta_dotnet_mode == 'source-only'
+      - mta_dotnet_extra_args is sequence
+      - mta_dotnet_extra_args is not string
+    fail_msg: >-
+      The MTA .NET role requires non-empty paths, the csharp provider,
+      source-only mode, and a list for mta_dotnet_extra_args.
+
+- name: Inspect the source directory
+  ansible.builtin.stat:
+    path: "{{ mta_dotnet_source_path }}"
+  register: mta_dotnet_source_stat
+
+- name: Require an existing source directory
+  ansible.builtin.assert:
+    that:
+      - mta_dotnet_source_stat.stat.exists
+      - mta_dotnet_source_stat.stat.isdir
+    fail_msg: "The .NET source directory does not exist: {{ mta_dotnet_source_path }}"
+
+- name: Normalize the .NET source tree for MTA
+  ansible.builtin.script:
+    cmd: >-
+      prepare_mta_dotnet.py
+      --source {{ mta_dotnet_source_path | quote }}
+      --workspace {{ mta_dotnet_workspace_dir | quote }}
+      --staged-source {{ mta_dotnet_staged_source_dir | quote }}
+      --manifest {{ mta_dotnet_manifest_file | quote }}
+      --exclude-json {{ mta_dotnet_excluded_directories | to_json | quote }}
+    executable: python3
+  register: mta_dotnet_prepare_result
+
+- name: Load the staged-source inventory
+  ansible.builtin.set_fact:
+    mta_dotnet_scope: "{{ mta_dotnet_prepare_result.stdout | from_json }}"
+
+- name: Require a C# project that MTA can analyze
+  ansible.builtin.assert:
+    that:
+      - mta_dotnet_scope.mta_csharp_ready
+    fail_msg: >-
+      No MTA-ready C# project was found. The staged tree must contain C# source
+      and at least one .sln or .csproj file. MTA does not translate or natively
+      analyze Visual Basic; use the net_analyzer role and .NET Upgrade Assistant
+      for a VB-only application.
+  when: mta_dotnet_fail_on_vb_only | bool
+
+- name: Install the bundled C# modernization rules
+  ansible.builtin.copy:
+    src: rules/csharp-modernization/
+    dest: "{{ mta_dotnet_rules_dir }}/"
+    mode: preserve
+
+- name: Check the MTA CLI version
+  ansible.builtin.command:
+    argv:
+      - "{{ mta_cli_binary }}"
+      - version
+  register: mta_dotnet_cli_version
+  changed_when: false
+  when:
+    - mta_dotnet_execute_analysis | bool
+    - mta_dotnet_scope.mta_csharp_ready
+
+- name: List installed MTA providers
+  ansible.builtin.command:
+    argv:
+      - "{{ mta_cli_binary }}"
+      - provider
+      - list
+  register: mta_dotnet_provider_list
+  changed_when: false
+  when:
+    - mta_dotnet_execute_analysis | bool
+    - mta_dotnet_scope.mta_csharp_ready
+
+- name: Require the MTA C# provider
+  ansible.builtin.assert:
+    that:
+      - "'csharp' in (mta_dotnet_provider_list.stdout | lower)"
+    fail_msg: "The installed MTA CLI does not list the required csharp provider."
+  when:
+    - mta_dotnet_execute_analysis | bool
+    - mta_dotnet_scope.mta_csharp_ready
+
+- name: Validate Podman container access
+  ansible.builtin.command:
+    argv:
+      - podman
+      - info
+      - --format
+      - json
+  changed_when: false
+  when:
+    - mta_dotnet_execute_analysis | bool
+    - mta_dotnet_scope.mta_csharp_ready
+
+- name: Validate the bundled MTA ruleset
+  ansible.builtin.command:
+    argv:
+      - "{{ mta_cli_binary }}"
+      - rules
+      - test
+      - "{{ mta_dotnet_rules_dir }}"
+  changed_when: false
+  when:
+    - mta_dotnet_execute_analysis | bool
+    - mta_dotnet_validate_rules | bool
+    - mta_dotnet_scope.mta_csharp_ready
+
+- name: Build the MTA C# analysis command
+  ansible.builtin.set_fact:
+    mta_dotnet_analysis_command: >-
+      {{
+        [
+          mta_cli_binary,
+          'analyze',
+          '--input', mta_dotnet_staged_source_dir,
+          '--output', mta_dotnet_report_dir,
+          '--provider', mta_dotnet_provider,
+          '--mode', mta_dotnet_mode,
+          '--run-local=false',
+          '--rules', mta_dotnet_rules_dir,
+          '--enable-default-rulesets=' ~ (mta_dotnet_enable_default_rulesets | bool | ternary('true', 'false'))
+        ]
+        + (mta_dotnet_overwrite_report | bool | ternary(['--overwrite'], []))
+        + mta_dotnet_extra_args
+      }}
+  when: mta_dotnet_scope.mta_csharp_ready
+
+- name: Run the MTA C# source analysis
+  ansible.builtin.command:
+    argv: "{{ mta_dotnet_analysis_command }}"
+  register: mta_dotnet_analysis_result
+  changed_when: true
+  when:
+    - mta_dotnet_execute_analysis | bool
+    - mta_dotnet_scope.mta_csharp_ready
+
+- name: Inspect the generated static report
+  ansible.builtin.stat:
+    path: "{{ mta_dotnet_static_report }}"
+  register: mta_dotnet_report_stat
+  when:
+    - mta_dotnet_execute_analysis | bool
+    - mta_dotnet_scope.mta_csharp_ready
+
+- name: Require the generated static report
+  ansible.builtin.assert:
+    that:
+      - mta_dotnet_report_stat.stat.exists
+      - mta_dotnet_report_stat.stat.isreg
+    fail_msg: >-
+      MTA completed without producing the expected static report at
+      {{ mta_dotnet_static_report }}.
+  when:
+    - mta_dotnet_execute_analysis | bool
+    - mta_dotnet_scope.mta_csharp_ready
+
+- name: Display the MTA .NET analysis summary
+  ansible.builtin.debug:
+    msg:
+      - "Staged source: {{ mta_dotnet_staged_source_dir }}"
+      - "Scope manifest: {{ mta_dotnet_manifest_file }}"
+      - "Detected source kind: {{ mta_dotnet_scope.source_kind }}"
+      - "C# projects: {{ mta_dotnet_scope.counts.csharp_projects }}"
+      - "Visual Basic projects recorded but not analyzed by MTA: {{ mta_dotnet_scope.counts.visual_basic_projects }}"
+      - >-
+        {{
+          ('Static report: ' ~ mta_dotnet_static_report)
+          if (mta_dotnet_execute_analysis | bool and mta_dotnet_scope.mta_csharp_ready)
+          else 'MTA execution skipped; only the normalized workspace and manifest were generated.'
+        }}

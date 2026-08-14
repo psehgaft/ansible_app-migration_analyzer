@@ -1,0 +1,49 @@
+- ruleID: dotnet-system-web-0001
+  description: Legacy ASP.NET System.Web dependency
+  category: mandatory
+  effort: 5
+  message: Replace System.Web APIs with supported ASP.NET Core equivalents or redesign the affected component.
+  when:
+    csharp.referenced:
+      location: ALL
+      pattern: System.Web.*
+
+- ruleID: dotnet-wcf-0002
+  description: Windows Communication Foundation dependency
+  category: mandatory
+  effort: 5
+  message: Review WCF hosting, bindings, contracts, and clients and select a supported service migration strategy.
+  when:
+    csharp.referenced:
+      location: ALL
+      pattern: System.ServiceModel.*
+
+- ruleID: dotnet-windows-forms-0003
+  description: Windows Forms dependency
+  category: mandatory
+  effort: 7
+  message: Windows Forms is Windows-specific; define a desktop retention or user-interface replacement strategy.
+  when:
+    csharp.referenced:
+      location: ALL
+      pattern: System.Windows.Forms.*
+
+- ruleID: dotnet-registry-0004
+  description: Windows Registry dependency
+  category: mandatory
+  effort: 3
+  message: Replace registry-backed configuration or isolate the Windows-specific implementation before Linux container deployment.
+  when:
+    csharp.referenced:
+      location: ALL
+      pattern: Microsoft.Win32.Registry.*
+
+- ruleID: dotnet-websecurity-0005
+  description: Legacy WebMatrix WebSecurity dependency
+  category: mandatory
+  effort: 5
+  message: Replace WebMatrix WebSecurity with a supported authentication and identity implementation.
+  when:
+    csharp.referenced:
+      location: ALL
+      pattern: WebMatrix.WebData.WebSecurity

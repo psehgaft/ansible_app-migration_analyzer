@@ -252,6 +252,146 @@ Official references:
 - [.NET Upgrade Assistant overview and supported project types](https://learn.microsoft.com/en-us/dotnet/core/porting/upgrade-assistant-overview)
 - [Install .NET on RHEL](https://learn.microsoft.com/en-us/dotnet/core/install/linux-rhel)
 
+## Automated MTA C# workspace and report
+
+The `mta_dotnet_analyzer` role automates the repeatable preparation and MTA
+analysis of a .NET source tree. It copies the application into a managed
+workspace, preserves its directory structure, inventories the analysis scope,
+installs a starter C# modernization ruleset, invokes the MTA `csharp` provider,
+and verifies the generated static HTML report.
+
+This preparation is a source normalization step, not a language conversion.
+The role never changes `.cs`, `.vb`, `.sln`, `.csproj`, or `.vbproj` content and
+does not translate Visual Basic to C#. MTA receives the staged C# solution or
+project in the structure expected by its C# provider.
+
+### Role layout
+
+| Path | Purpose |
+|---|---|
+| `mta-dotnet-analysis.yml` | Dedicated localhost playbook for the MTA C# workflow |
+| `roles/mta_dotnet_analyzer/defaults/main.yml` | Workspace, provider, report, rules, and exclusion defaults |
+| `roles/mta_dotnet_analyzer/tasks/main.yml` | Source preparation, preflight validation, MTA execution, and report verification |
+| `roles/mta_dotnet_analyzer/files/prepare_mta_dotnet.py` | Safe staging and source-inventory helper |
+| `roles/mta_dotnet_analyzer/files/rules/csharp-modernization/` | Starter custom C# ruleset used by the role |
+
+### What the preparation step does
+
+1. Validates that the source is an existing directory.
+2. Refuses to place the managed workspace inside the source tree or overwrite
+   an unmarked directory.
+3. Copies the complete source layout while excluding `.git`, `.vs`, `bin`,
+   `obj`, test results, and other generated directories.
+4. Preserves solution, project, source, configuration, package, library, DLL,
+   and WSDL files needed to understand project references and dependencies.
+5. Writes `analysis-scope.json` with the detected `.sln`, `.csproj`, `.vbproj`,
+   `.cs`, `.vb`, `.config`, `.dll`, and `.wsdl` files.
+6. Requires C# source plus a `.sln` or `.csproj` before invoking MTA.
+7. Checks the MTA version, confirms the `csharp` provider, validates Podman and
+   the custom ruleset, and runs a containerized source-only analysis.
+8. Fails if MTA does not create `report/static-report/index.html`.
+
+The managed workspace marker allows a later run to refresh only the staged
+source directory. The role will not recursively replace an arbitrary existing
+directory.
+
+### Prerequisites
+
+Complete the RHEL and MTA CLI installation documented by this repository, then
+verify:
+
+```bash
+ansible-playbook --version
+python3 --version
+podman info
+mta-cli version
+mta-cli provider list
+```
+
+The provider list must contain `csharp`. Non-Java MTA providers run in
+container mode, so the analysis user must have a working rootless Podman
+configuration and access to any required provider images and approved NuGet
+sources.
+
+### Run the role
+
+```bash
+cd /opt/app-migration-analyzer/repository
+
+ansible-playbook -i localhost, mta-dotnet-analysis.yml \
+  -e "mta_dotnet_source_path=/srv/mta/input/legacy-application" \
+  -e "mta_dotnet_output_dir=/srv/mta/output/legacy-application-mta"
+```
+
+Use absolute paths. The output directory must be outside the application
+source tree. For repeatable automation, put the variables in an external file:
+
+```yaml
+---
+mta_dotnet_source_path: "/srv/mta/input/legacy-application"
+mta_dotnet_output_dir: "/srv/mta/output/legacy-application-mta"
+mta_dotnet_execute_analysis: true
+mta_dotnet_validate_rules: true
+mta_dotnet_overwrite_report: true
+mta_dotnet_enable_default_rulesets: false
+mta_dotnet_extra_args: []
+```
+
+```bash
+ansible-playbook -i localhost, mta-dotnet-analysis.yml \
+  -e @/secure/path/mta-dotnet-vars.yml
+```
+
+### Generated structure
+
+```text
+/srv/mta/output/legacy-application-mta/
+├── workspace/
+│   ├── .mta-dotnet-workspace
+│   ├── analysis-scope.json
+│   ├── rules/
+│   │   └── csharp-modernization/
+│   └── source/
+│       ├── Application.sln
+│       └── ...
+└── report/
+    └── static-report/
+        └── index.html
+```
+
+Open the report from the analysis server with the same loopback HTTP server and
+SSH tunnel described below, using:
+
+```bash
+cd /srv/mta/output/legacy-application-mta/report/static-report
+python3 -m http.server 8080 --bind 127.0.0.1
+```
+
+### Variable reference
+
+| Variable | Default | Description |
+|---|---|---|
+| `mta_dotnet_source_path` | `./legacy_project` in the playbook | Source tree copied into the managed workspace |
+| `mta_dotnet_output_dir` | `./migration_report/mta-dotnet` in the playbook | Workspace and report root |
+| `mta_dotnet_execute_analysis` | `true` | Run MTA after staging; set to `false` for inventory-only preparation |
+| `mta_dotnet_validate_rules` | `true` | Run `mta-cli rules test` before analysis |
+| `mta_dotnet_overwrite_report` | `true` | Pass `--overwrite` for a repeatable output location |
+| `mta_dotnet_enable_default_rulesets` | `false` | Keep the run scoped to the bundled starter C# rules by default |
+| `mta_dotnet_fail_on_vb_only` | `true` | Stop with guidance when no analyzable C# project is present |
+| `mta_dotnet_excluded_directories` | Generated and VCS directories | Directory names omitted from the staged copy |
+| `mta_dotnet_extra_args` | `[]` | Additional MTA CLI arguments appended as an argv list |
+
+Set both `mta_dotnet_execute_analysis=false` and
+`mta_dotnet_fail_on_vb_only=false` to inventory a VB-only tree without calling
+MTA. Then run `playbook.yml` for the repository's VB-aware heuristic report and
+use .NET Upgrade Assistant on Windows for the supported project-level analysis.
+
+The bundled rules identify selected legacy ASP.NET, WCF, Windows Forms,
+Windows Registry, and WebMatrix dependencies. They are a transparent starter
+ruleset, not a complete modernization assessment. Add tested,
+organization-approved C# rules when the target architecture requires broader
+coverage.
+
 ## Repository Ansible analysis tool
 
 The repository includes a local Ansible playbook that performs a fast,

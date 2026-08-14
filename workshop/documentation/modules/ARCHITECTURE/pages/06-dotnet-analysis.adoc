@@ -83,6 +83,57 @@ If approved built-in rules cover the intended path, use the corresponding
 the explicit `--provider csharp` selection so unsupported languages in a mixed
 repository do not make provider detection fail.
 
+== Automate preparation and reporting with the repository role
+
+The repository includes `mta-dotnet-analysis.yml` and the
+`mta_dotnet_analyzer` role. The role creates a managed copy of the application,
+preserves the solution and project structure, records the source inventory,
+installs the bundled starter rules, runs the containerized C# provider, and
+checks that MTA produced the static report.
+
+This is normalization, not source-language conversion. The role does not edit
+or translate C# or Visual Basic files.
+
+[source,bash]
+----
+cd /opt/app-migration-analyzer/repository
+
+ansible-playbook -i localhost, mta-dotnet-analysis.yml \
+  -e "mta_dotnet_source_path=/srv/mta/input/legacy-payments" \
+  -e "mta_dotnet_output_dir=/srv/mta/output/legacy-payments-mta"
+----
+
+The role creates:
+
+[source,text]
+----
+/srv/mta/output/legacy-payments-mta/
+├── workspace/
+│   ├── analysis-scope.json
+│   ├── rules/csharp-modernization/
+│   └── source/
+└── report/static-report/index.html
+----
+
+Use preparation-only mode to inspect the staged scope before consuming
+provider images or running rules:
+
+[source,bash]
+----
+ansible-playbook -i localhost, mta-dotnet-analysis.yml \
+  -e "mta_dotnet_source_path=/srv/mta/input/legacy-payments" \
+  -e "mta_dotnet_output_dir=/srv/mta/output/legacy-payments-mta" \
+  -e "mta_dotnet_execute_analysis=false"
+
+python3 -m json.tool \
+  /srv/mta/output/legacy-payments-mta/workspace/analysis-scope.json
+----
+
+The workspace must be outside the source tree. The role excludes generated
+directories such as `bin` and `obj`, but preserves project files,
+configuration, checked-in packages, vendor libraries, DLLs, and WSDL contracts.
+Review `analysis-scope.json` before accepting the report as complete.
+
 == Mixed solutions
 
 For a solution containing both `.cs` and `.vb` projects:
@@ -93,3 +144,8 @@ For a solution containing both `.cs` and `.vb` projects:
 . Run the Visual Basic fallback described in the next module.
 . Combine findings only at the portfolio level; keep evidence provenance
   separate.
+
+For a VB-only source tree, the role fails before MTA execution by default. To
+generate only the inventory and managed copy, set both
+`mta_dotnet_execute_analysis=false` and `mta_dotnet_fail_on_vb_only=false`, then
+use the fallback in the next module for the actual VB assessment.
