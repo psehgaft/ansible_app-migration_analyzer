@@ -252,14 +252,299 @@ Official references:
 - [.NET Upgrade Assistant overview and supported project types](https://learn.microsoft.com/en-us/dotnet/core/porting/upgrade-assistant-overview)
 - [Install .NET on RHEL](https://learn.microsoft.com/en-us/dotnet/core/install/linux-rhel)
 
-## Existing Ansible analyzer
+## Repository Ansible analysis tool
+
+The repository includes a local Ansible playbook that performs a fast,
+read-only heuristic assessment of legacy C# and Visual Basic source trees. It
+counts source artifacts, detects selected migration blockers, copies discovered
+WSDL contracts, calculates indicative complexity levels for two target paths,
+and generates an HTML report.
+
+Use this tool for early discovery and portfolio triage. It complements MTA and
+.NET Upgrade Assistant; it does not compile the application or perform
+language-semantic analysis.
+
+### Repository layout
+
+| Path | Purpose |
+|---|---|
+| `playbook.yml` | Local playbook entry point and default input/output paths |
+| `roles/net_analyzer/defaults/main.yml` | Role variables and derived report paths |
+| `roles/net_analyzer/tasks/main.yml` | Validation, analysis, WSDL collection, report generation, and console summary |
+| `roles/net_analyzer/files/analyze_code.py` | Recursive C#/VB source scanner and complexity scoring engine |
+| `roles/net_analyzer/templates/report.html.j2` | Jinja2 template for the final HTML report |
+
+### Execution flow
+
+The playbook performs the following ordered operations:
+
+1. Verifies that `source_code_path` exists.
+2. Creates the output and WSDL directories.
+3. Executes `analyze_code.py` against the source tree.
+4. Parses the JSON returned by the Python analyzer into an Ansible fact.
+5. Copies discovered `.wsdl` files into the evidence directory.
+6. Renders the HTML migration-complexity report.
+7. Prints the class count, WSDL count, target complexity, and report location.
+
+The playbook runs against `localhost` with `connection: local`. The application
+source must therefore be available on the same machine that runs
+`ansible-playbook`, either on a local disk or a mounted file system.
+
+### What the analyzer inspects
+
+The Python scanner recursively examines `.cs`, `.vb`, `.aspx`, and `.wsdl`
+files.
+
+| Metric or finding | Detection method | Migration relevance |
+|---|---|---|
+| C# files | `.cs` extension | Defines the C# assessment scope |
+| Visual Basic files | `.vb` extension | Defines the VB/VB.NET assessment scope |
+| Classes | Regular expressions for C# and VB class declarations | Provides an approximate structural size |
+| Lines of code | Physical lines in `.cs` and `.vb` files | Provides a basic sizing indicator |
+| WSDL contracts | `.wsdl` extension | Identifies SOAP service contracts for review |
+| ASP.NET Web Forms | `.aspx` extension | Indicates a likely UI rewrite requirement |
+| Legacy ASP.NET | `System.Web` found in a source file | Identifies APIs unavailable in modern cross-platform .NET |
+| WCF/SOAP | `System.ServiceModel` found in a source file | Identifies service-contract and hosting migration work |
+| Native Windows dependencies | `DllImport` or `Microsoft.Win32` found in a source file | Identifies Windows and container portability blockers |
+| Legacy data access | `DataSet` or `DataTable` found in a source file | Identifies code that may require data-access redesign |
+
+Pattern metrics count affected source files, not every API invocation inside a
+file. The class and line counts are approximations and should not be used as
+contractual effort estimates.
+
+### Complexity scoring
+
+The analyzer calculates two independent indicative scores:
+
+| Condition | .NET Core / modern .NET | Java / Quarkus |
+|---|---:|---:|
+| No escalator detected | Low | Medium |
+| At least one WCF file, or more than five files using `System.Web` | Medium | High |
+| At least one `.aspx` file or one file using native Windows APIs | High | Very High — rewrite required |
+
+The last matching condition has precedence. For example, a source tree with
+both WCF and Web Forms is rated **High** for modern .NET and **Very High
+(Rewrite Required)** for Quarkus.
+
+These levels are triage signals. Validate them with MTA, .NET Upgrade
+Assistant, dependency analysis, application-owner interviews, and a technical
+proof of concept before committing cost or delivery dates.
+
+### Prerequisites
+
+On RHEL 8, 9, or 10:
 
 ```bash
-sudo dnf install -y ansible-core python3
-ansible-playbook playbook.yml \
-  -e "source_code_path=/path/to/legacy-source" \
-  -e "output_dir=/path/to/report"
+sudo dnf install -y ansible-core python3 git
+
+ansible-playbook --version
+python3 --version
+git --version
 ```
 
-The Ansible role provides a heuristic inventory. It is not a replacement for
-MTA's Java or C# semantic providers.
+The current tool uses only Python standard-library modules. No additional
+Python packages or Ansible collections are required.
+
+Recommended host resources for a single analysis are 2 vCPU, 4 GiB RAM, and
+enough free disk to store the source tree, copied WSDL files, and report. Large
+repositories or concurrent runs require additional memory and I/O capacity.
+
+### Clone and validate the repository
+
+```bash
+sudo install -d -m 0755 /opt/app-migration-analyzer
+sudo chown "$USER":"$(id -gn)" /opt/app-migration-analyzer
+
+git clone \
+  https://github.com/psehgaft/ansible_app-migration_analyzer.git \
+  /opt/app-migration-analyzer/repository
+cd /opt/app-migration-analyzer/repository
+
+ansible-playbook --syntax-check playbook.yml
+python3 -m py_compile roles/net_analyzer/files/analyze_code.py
+```
+
+### Run with command-line variables
+
+```bash
+cd /opt/app-migration-analyzer/repository
+
+ansible-playbook -i localhost, playbook.yml \
+  -e "source_code_path=/srv/mta/input/legacy-application" \
+  -e "output_dir=/srv/mta/output/legacy-application-heuristic"
+```
+
+Use absolute paths for repeatable execution. Quote paths that contain spaces.
+The output path can be outside the repository and should not point into the
+source tree being analyzed.
+
+### Run with a variables file
+
+Create `analysis-vars.yml` outside the Git repository:
+
+```yaml
+---
+source_code_path: "/srv/mta/input/legacy-application"
+output_dir: "/srv/mta/output/legacy-application-heuristic"
+wsdl_output_dir: "/srv/mta/output/legacy-application-heuristic/wsdls"
+report_file: "/srv/mta/output/legacy-application-heuristic/migration_report.html"
+```
+
+Run the playbook:
+
+```bash
+ansible-playbook -i localhost, playbook.yml \
+  -e @/secure/path/analysis-vars.yml
+```
+
+The variables file must not contain application, registry, or repository
+credentials. Protect environment-specific files according to organizational
+policy and do not commit them.
+
+### Variable reference
+
+| Variable | Default | Description |
+|---|---|---|
+| `source_code_path` | `./legacy_project` in `playbook.yml` | Local source directory scanned recursively |
+| `output_dir` | `./migration_report` in `playbook.yml` | Root directory for generated evidence |
+| `wsdl_output_dir` | `{{ output_dir }}/wsdls` | Directory containing copied WSDL contracts |
+| `report_file` | `{{ output_dir }}/migration_report.html` | Final HTML report path |
+
+Variables declared in `playbook.yml` override the role defaults. Command-line
+extra variables or an `-e @file.yml` variables file override both.
+
+### Expected output
+
+For `output_dir=/srv/mta/output/legacy-application-heuristic`, the result is:
+
+```text
+/srv/mta/output/legacy-application-heuristic/
+├── migration_report.html
+└── wsdls/
+    ├── CustomerService.wsdl
+    └── OrderService.wsdl
+```
+
+The console summary resembles:
+
+```text
+=== ANALYSIS COMPLETE ===
+Total classes: 247
+WSDL files copied: 2
+.NET Core complexity: High
+Java (Quarkus) complexity: Very High (Rewrite Required)
+Report generated at: /srv/mta/output/legacy-application-heuristic/migration_report.html
+```
+
+Open the report locally:
+
+```bash
+xdg-open /srv/mta/output/legacy-application-heuristic/migration_report.html
+```
+
+For a headless server, serve it only on loopback and use an SSH tunnel:
+
+```bash
+cd /srv/mta/output/legacy-application-heuristic
+python3 -m http.server 8080 --bind 127.0.0.1
+```
+
+```bash
+ssh -L 8080:127.0.0.1:8080 analysis-user@mta-server.example.com
+```
+
+Open `http://127.0.0.1:8080/migration_report.html` from the workstation.
+
+### Interpreting the report
+
+Review the report in this order:
+
+1. Confirm the analyzed path and source scope.
+2. Compare C# and VB file counts with the repository inventory.
+3. Validate class and LOC totals as approximate sizing indicators.
+4. Review WCF, `System.Web`, Web Forms, and Windows API findings.
+5. Inspect every copied WSDL for service ownership and external consumers.
+6. Use the target scores to prioritize deeper MTA and Upgrade Assistant work.
+7. Record false positives, excluded paths, unreadable files, and manual
+   findings in the final assessment.
+
+The HTML template loads Bootstrap styling from a public CDN. In a disconnected
+environment, the report content remains available but styling can be limited
+unless the dependency is mirrored or embedded under the organization's web
+content policy.
+
+### Operational and security considerations
+
+- Run the playbook as an unprivileged analysis user.
+- Prefer a read-only source checkout or snapshot.
+- Store output outside the application source directory.
+- Treat WSDL files as sensitive because they can expose internal endpoints,
+  namespaces, operations, and data contracts.
+- Restrict report-directory permissions and evidence retention.
+- Do not publish customer reports through GitHub Pages.
+- Record the repository commit used to run each assessment:
+
+  ```bash
+  git rev-parse HEAD
+  ```
+
+- Create a new output directory per execution to preserve audit history.
+- Check free disk space before scanning large portfolios.
+
+### Current limitations
+
+- The scanner is regex- and text-based; it does not compile source code.
+- It does not resolve NuGet dependencies, project references, inheritance,
+  reflection, runtime configuration, or generated code semantics.
+- Source files that cannot be read are skipped by the Python scanner.
+- Findings for `System.Web`, WCF, and native Windows APIs count affected files,
+  not individual call sites.
+- The current HTML template does not display the internal `DataSet` and
+  `DataTable` metric.
+- WSDL files with the same basename are copied to the same destination and can
+  overwrite one another; review the source inventory when duplicate names
+  exist.
+- The playbook does not exclude `bin`, `obj`, vendored, generated, test, or
+  archive directories automatically.
+- The playbook does not persist the raw analyzer JSON as a separate evidence
+  file.
+- The scores are heuristic and are not equivalent to MTA story points or a
+  delivery estimate.
+
+### Troubleshooting
+
+Validate the source path:
+
+```bash
+test -d /srv/mta/input/legacy-application
+find /srv/mta/input/legacy-application -type f \
+  \( -name '*.cs' -o -name '*.vb' -o -name '*.aspx' -o -name '*.wsdl' \) \
+  | head -50
+```
+
+Check output permissions:
+
+```bash
+install -d -m 0750 /srv/mta/output/legacy-application-heuristic
+test -w /srv/mta/output/legacy-application-heuristic
+```
+
+Run with additional Ansible detail:
+
+```bash
+ansible-playbook -i localhost, playbook.yml \
+  -e "source_code_path=/srv/mta/input/legacy-application" \
+  -e "output_dir=/srv/mta/output/legacy-application-heuristic" \
+  -vv
+```
+
+Run the Python analyzer directly to isolate playbook or template problems:
+
+```bash
+python3 roles/net_analyzer/files/analyze_code.py \
+  /srv/mta/input/legacy-application | python3 -m json.tool
+```
+
+If the HTML report is not generated, inspect the Ansible failure, confirm that
+the analyzer returned valid JSON, and verify that the output directory is
+writable. Do not bypass a failed source-path validation.
