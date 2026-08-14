@@ -252,6 +252,484 @@ Official references:
 - [.NET Upgrade Assistant overview and supported project types](https://learn.microsoft.com/en-us/dotnet/core/porting/upgrade-assistant-overview)
 - [Install .NET on RHEL](https://learn.microsoft.com/en-us/dotnet/core/install/linux-rhel)
 
+## Prepare the RHEL server for MTA CLI
+
+Complete this section before running MTA manually or through the
+`mta_dotnet_analyzer` role. The examples target MTA 8.2 on RHEL 8, RHEL 9, or
+RHEL 10 and assume that analyses run as an unprivileged service or analysis
+user.
+
+### Select the analysis mode
+
+| Application input | MTA provider and mode | Host preparation |
+|---|---|---|
+| Java source | Java, containerless or container | JDK 17+, Maven 3.9.9+; Podman and registry access when container mode is selected |
+| Java binary archives | Java binary analysis | JDK 17+, sufficient temporary storage, original deployment archives |
+| C# source | `csharp`, containerized `source-only` mode | Podman, Red Hat registry authentication, `.sln` or `.csproj`, C# source, dependencies, and applicable rules |
+| Visual Basic source | No native MTA semantic provider | Use the repository heuristic role and .NET Upgrade Assistant on Windows; do not represent this as an MTA result |
+
+The automated role in this repository uses the C# provider with
+`--run-local=false` and `--mode source-only`.
+
+### Host, access, and capacity checklist
+
+Prepare all of the following before installation:
+
+- A supported `x86_64` or `aarch64` RHEL 8, 9, or 10 server.
+- A named, unprivileged analysis account with `sudo` access for installation.
+- An active Red Hat subscription, Satellite content view, or approved internal
+  RHEL repository mirror.
+- A Red Hat account authorized to download MTA and authenticate to
+  `registry.redhat.io`.
+- DNS, NTP, and outbound HTTPS connectivity, or approved internal mirrors.
+- Access to the application Git repository or a verified source archive.
+- Access to required Maven, NuGet, and vendor dependency repositories.
+- Credentials for private artifact feeds stored outside Git and playbook
+  variables.
+- Enough space for the original source, normalized copy, container images,
+  dependency caches, MTA working data, and final reports.
+
+Use this baseline for one analysis at a time:
+
+| Resource | Minimum lab | Recommended analysis server |
+|---|---:|---:|
+| CPU | 2 vCPU | 4 or more vCPU |
+| RAM | 8 GiB | 16 GiB or more |
+| Free disk | 30 GiB | 100 GiB or more |
+| File system | XFS or ext4 | XFS with a separate `/srv/mta` workspace |
+
+Large monorepositories, retained reports, parallel analyses, or large provider
+images require additional CPU, RAM, and storage. Monitor the first
+representative application before setting a shared-server concurrency limit.
+
+Inspect the host:
+
+```bash
+cat /etc/redhat-release
+uname -m
+getenforce
+timedatectl status
+free -h
+df -hT
+```
+
+The MTA archive suffix is `linux-amd64` for `x86_64` and `linux-arm64` for
+`aarch64`.
+
+### Register RHEL and validate repositories
+
+Skip registration only when Satellite or another approved content-management
+system already manages the host.
+
+```bash
+sudo subscription-manager status
+sudo subscription-manager register
+sudo subscription-manager refresh
+sudo subscription-manager repos --list-enabled
+sudo dnf -y makecache
+```
+
+Never place Red Hat passwords, registry tokens, proxy credentials, Maven
+passwords, or NuGet API keys in shell scripts, Git, command-line extra
+variables, or unencrypted Ansible variable files.
+
+### Install operating-system packages
+
+Install the common CLI, archive, security, and Ansible dependencies:
+
+```bash
+sudo dnf -y install \
+  ansible-core ca-certificates curl findutils git gzip jq openssl \
+  procps-ng python3 shadow-utils tar unzip which
+```
+
+Install Podman and its supporting container tools.
+
+RHEL 8:
+
+```bash
+sudo dnf -y module reset container-tools
+sudo dnf -y module install container-tools:rhel8
+```
+
+RHEL 9 or RHEL 10:
+
+```bash
+sudo dnf -y install container-tools
+```
+
+If Satellite exposes `container-tools` as ordinary packages instead of a RHEL
+8 module stream, follow the approved content-view procedure.
+
+### Create the analysis account and directory layout
+
+The following example assumes that `mta-analysis` is a dedicated local
+account. Integrate it with the organization's identity and privilege policy
+when centralized identity management is used.
+
+```bash
+id mta-analysis >/dev/null 2>&1 || \
+  sudo useradd --create-home --shell /bin/bash mta-analysis
+sudo install -d -m 0755 /opt/mta
+sudo install -d -m 0750 -o mta-analysis -g mta-analysis \
+  /srv/mta/input /srv/mta/output /srv/mta/rules /srv/mta/cache
+```
+
+Do not make the workspace world-writable. Application source, configuration,
+WSDL contracts, dependency metadata, and reports can contain sensitive
+information. Keep source read-only where practical, and create a separate
+output directory for each assessment or use `--overwrite` only intentionally.
+
+Validate access as the analysis user:
+
+```bash
+sudo -iu mta-analysis
+test -r /srv/mta/input
+test -w /srv/mta/output
+test -w /srv/mta/cache
+umask 027
+```
+
+### Configure rootless Podman
+
+C# and other non-Java providers run in container mode. Verify subordinate UID
+and GID allocations and container storage for the analysis account:
+
+```bash
+id
+grep "^$(id -un):" /etc/subuid /etc/subgid
+podman --version
+podman info --debug
+```
+
+If subordinate ranges are absent, an administrator must allocate them under
+the organization's identity policy. After changing ranges, run the following
+as the analysis user:
+
+```bash
+podman system migrate
+```
+
+Test image pulls and rootless execution:
+
+```bash
+podman run --rm registry.access.redhat.com/ubi9/ubi-minimal true
+podman login registry.redhat.io
+podman login --get-login registry.redhat.io
+```
+
+Use interactive login or the enterprise secret manager. Do not put registry
+credentials on the command line or in this repository. Confirm that container
+storage has sufficient space:
+
+```bash
+podman info --format json | jq '.store'
+df -h "$HOME/.local/share/containers" /var/lib/containers 2>/dev/null || true
+```
+
+### Configure proxy, DNS, firewall, and certificate trust
+
+Allow or mirror the endpoints required by the selected workflow:
+
+- `registry.redhat.io` for MTA provider images.
+- `registry.access.redhat.com` for Red Hat base-image validation.
+- `developers.redhat.com` for the authorized MTA CLI download.
+- The organization's source-control endpoints.
+- Approved Maven repositories or mirrors for Java dependencies.
+- Approved NuGet feeds or mirrors for C# dependencies.
+- Any private vendor artifact repositories referenced by the application.
+
+When an outbound proxy is required, configure it in the analysis account's
+managed environment rather than embedding credentials in the repository:
+
+```bash
+export HTTP_PROXY="http://proxy.example.com:8080"
+export HTTPS_PROXY="http://proxy.example.com:8080"
+export NO_PROXY="localhost,127.0.0.1,.example.com"
+
+curl -I https://registry.redhat.io/v2/
+curl -I https://developers.redhat.com/
+```
+
+Install the enterprise CA chain instead of disabling TLS verification:
+
+```bash
+sudo install -m 0644 organization-root-ca.pem \
+  /etc/pki/ca-trust/source/anchors/organization-root-ca.pem
+sudo update-ca-trust
+openssl s_client -connect registry.redhat.io:443 \
+  -servername registry.redhat.io </dev/null
+```
+
+Provider containers must also trust internal Maven, NuGet, proxy, and source
+control certificates. Validate that requirement with a representative provider
+run; host trust alone does not prove that an internal endpoint is trusted
+inside every container image.
+
+### Install JDK 17 or later
+
+MTA 8.2 requires JDK 17 or later for the supported CLI preparation flow.
+
+```bash
+sudo dnf -y install java-17-openjdk-devel
+
+JAVA_BIN="$(readlink -f "$(command -v java)")"
+MTA_JAVA_HOME="${JAVA_BIN%/bin/java}"
+printf 'Detected JAVA_HOME: %s\n' "$MTA_JAVA_HOME"
+java -version
+javac -version
+```
+
+Persist `JAVA_HOME` for the analysis environment:
+
+```bash
+sudo tee /etc/profile.d/mta-java.sh >/dev/null <<EOF
+export JAVA_HOME="$MTA_JAVA_HOME"
+export PATH="\$JAVA_HOME/bin:\$PATH"
+EOF
+sudo chmod 0644 /etc/profile.d/mta-java.sh
+source /etc/profile.d/mta-java.sh
+```
+
+If the approved RHEL 10 content view provides a later supported OpenJDK instead
+of OpenJDK 17, install that JDK and derive `JAVA_HOME` with the same procedure.
+
+### Install Maven 3.9.9 or later
+
+First inspect the version supplied by the enabled RHEL repositories:
+
+```bash
+dnf info maven | sed -n '/^Version/p'
+```
+
+Install it with DNF only if the offered version is 3.9.9 or later. Otherwise,
+download an Apache Maven binary and its checksum on a trusted workstation,
+copy both files to the server, and verify them before installation. This
+example uses Maven 3.9.11:
+
+```bash
+MTA_MAVEN_VERSION=3.9.11
+MTA_MAVEN_ARCHIVE="apache-maven-${MTA_MAVEN_VERSION}-bin.tar.gz"
+
+sha512sum -c "${MTA_MAVEN_ARCHIVE}.sha512"
+sudo tar -xzf "$MTA_MAVEN_ARCHIVE" -C /opt
+sudo ln -sfn "/opt/apache-maven-${MTA_MAVEN_VERSION}" /opt/maven
+
+sudo tee /etc/profile.d/mta-maven.sh >/dev/null <<'EOF'
+export MAVEN_HOME=/opt/maven
+export PATH="$MAVEN_HOME/bin:$PATH"
+EOF
+sudo chmod 0644 /etc/profile.d/mta-maven.sh
+source /etc/profile.d/mta-maven.sh
+mvn --version
+```
+
+For private Java dependencies, install the approved mirror configuration as
+`~/.m2/settings.xml`, protect it with mode `0600`, and confirm that Maven can
+resolve the application's dependencies. Do not commit the settings file when
+it contains credentials.
+
+### Download and install MTA CLI 8.2
+
+Download the archive matching `uname -m` from the official Red Hat MTA download
+page using an authorized account:
+
+- `mta-8.2.0-cli-linux-amd64.zip` for `x86_64`.
+- `mta-8.2.0-cli-linux-arm64.zip` for `aarch64`.
+
+Copy the archive to the analysis server, record its checksum in the assessment
+evidence, and install it for the analysis user:
+
+```bash
+MTA_VERSION=8.2.0
+case "$(uname -m)" in
+  x86_64) MTA_ARCH=linux-amd64 ;;
+  aarch64) MTA_ARCH=linux-arm64 ;;
+  *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+
+MTA_ZIP="mta-${MTA_VERSION}-cli-${MTA_ARCH}.zip"
+test -s "$MTA_ZIP"
+sha256sum "$MTA_ZIP" | tee "${MTA_ZIP}.sha256"
+install -d -m 0755 "$HOME/.kantra" "$HOME/.local/bin"
+unzip -q "$MTA_ZIP" -d "$HOME/.kantra"
+
+MTA_BIN="$(find "$HOME/.kantra" -maxdepth 3 -type f \
+  -name mta-cli -print -quit)"
+test -n "$MTA_BIN"
+chmod 0755 "$MTA_BIN"
+ln -sfn "$MTA_BIN" "$HOME/.local/bin/mta-cli"
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Persist `$HOME/.local/bin` in the analysis account's managed shell profile.
+Do not separate the binary from required directories extracted from the MTA
+archive.
+
+Validate the CLI:
+
+```bash
+mta-cli version
+mta-cli --help
+mta-cli provider list
+mta-cli rules list-sources
+mta-cli rules list-targets
+```
+
+The provider list must include `csharp` before running this repository's MTA
+.NET role. Use source and target names returned by the installed CLI rather
+than assuming that labels remain unchanged between releases.
+
+### Prepare Java application inputs
+
+For a Java source analysis, provide the complete buildable project, including
+the root `pom.xml` or Gradle files, modules, source, resources, configuration,
+wrappers, and any checked-in organization-approved dependencies. Before MTA:
+
+```bash
+cd /srv/mta/input/java-application
+git status --short
+mvn -q -DskipTests package
+```
+
+For binary analysis, preserve the original EAR, WAR, JAR, or deployment archive
+and record its checksum. Do not replace a production artifact with a locally
+rebuilt file without recording that difference.
+
+Resolve missing repositories, parent POMs, plugins, certificates, proxy
+settings, and private dependencies before relying on MTA dependency findings.
+
+### Prepare C#/.NET application inputs
+
+Provide a complete source checkout containing:
+
+- At least one `.sln` or `.csproj` and the referenced C# source files.
+- All project-to-project references and shared project directories.
+- `Directory.Build.props`, `Directory.Build.targets`, `global.json`,
+  `packages.config`, and application configuration files when present.
+- A sanitized `NuGet.Config` that identifies approved sources without exposing
+  credentials.
+- Checked-in `packages/`, `lib/`, DLL, generated-client, schema, and WSDL files
+  required by older .NET Framework projects.
+- Git submodules or external source components required by the solution.
+- A source commit SHA, branch or tag, acquisition date, and application owner.
+
+Inventory the input before execution:
+
+```bash
+MTA_DOTNET_INPUT=/srv/mta/input/legacy-application
+test -d "$MTA_DOTNET_INPUT"
+find "$MTA_DOTNET_INPUT" -type f \
+  \( -name '*.sln' -o -name '*.csproj' -o -name '*.vbproj' \
+     -o -name 'NuGet.Config' -o -name 'packages.config' \
+     -o -name 'Directory.Build.*' \) -print
+```
+
+Remove or exclude stale `bin`, `obj`, `.vs`, test-result, package-cache, and
+previous-report directories from the analysis copy. Do not delete them from
+the original working repository. The role performs this exclusion in its
+managed normalized copy.
+
+For mixed C# and Visual Basic solutions, preserve the complete solution to
+retain references, but record that MTA findings cover only the C# portion.
+Run the repository heuristic analyzer and the Windows Upgrade Assistant flow
+for Visual Basic evidence.
+
+### Prepare private dependency access
+
+Before the scheduled analysis window, test every dependency source with the
+same account, proxy, DNS, and CA configuration used by MTA:
+
+```bash
+mvn -q help:effective-settings >/dev/null
+curl -fsSI https://approved-nuget.example.com/v3/index.json >/dev/null
+```
+
+Use the organization's secret manager, short-lived tokens, or protected
+environment-specific files. Never copy credentials into application source,
+`analysis-scope.json`, custom rules, the HTML report, or PR content. Confirm
+that report-retention and log-sharing procedures do not expose dependency URLs
+or credentials.
+
+### Select and validate rules
+
+An MTA provider produces findings only when applicable rules run. Decide and
+record:
+
+- The migration source and target technologies.
+- Whether default rulesets are enabled.
+- Which custom rules and versions are included.
+- The rule owner, approval date, and validation evidence.
+- Known exclusions and accepted limitations.
+
+Validate this repository's bundled C# rules before analysis:
+
+```bash
+mta-cli rules test \
+  roles/mta_dotnet_analyzer/files/rules/csharp-modernization
+```
+
+The bundled rules are starter triage rules, not complete coverage for every
+framework, vendor library, security control, or target architecture.
+
+### Prepare disconnected environments
+
+For a disconnected container-mode installation:
+
+1. Install the same MTA CLI version on a connected staging host.
+2. Authenticate the staging host to `registry.redhat.io`.
+3. Run a representative analysis for every required provider so MTA pulls only
+   the necessary images.
+4. Record `podman images`, image digests, and MTA version.
+5. Export images with `podman save`, transfer them through the approved media
+   process, and import them with `podman load`.
+6. Mirror Maven, NuGet, Git, base images, and custom rules required by the
+   applications.
+7. Configure enterprise CA trust and repeat the readiness test offline.
+
+Dependency analysis can produce fewer or less accurate incidents when Maven or
+NuGet dependencies are unavailable. Record this limitation in every affected
+report rather than treating the disconnected result as complete.
+
+### Run the final readiness checks
+
+Run these commands as the same unprivileged account that will execute the
+playbook:
+
+```bash
+set -o pipefail
+
+cat /etc/redhat-release
+uname -m
+python3 --version
+ansible-playbook --version
+java -version
+javac -version
+test -n "$JAVA_HOME"
+mvn --version
+podman --version
+podman info --format json >/dev/null
+podman login --get-login registry.redhat.io
+mta-cli version
+mta-cli provider list | tee /tmp/mta-providers.txt
+grep -qi csharp /tmp/mta-providers.txt
+test -r /srv/mta/input
+test -w /srv/mta/output
+test -w /srv/mta/cache
+df -h /srv/mta "$HOME/.local/share/containers" 2>/dev/null || true
+```
+
+Do not start the application analysis until all applicable checks pass. Also
+record the MTA version, ruleset version, provider list, source commit, input
+checksum or inventory, execution date, analyst, and output location for each
+assessment.
+
+Official MTA references:
+
+- [Installing MTA 8.2 CLI](https://docs.redhat.com/en/documentation/migration_toolkit_for_applications/8.2/html/installing_the_migration_toolkit_for_applications/installing-mta-cli_installing-mta-title)
+- [Using MTA 8.2 CLI](https://docs.redhat.com/en/documentation/migration_toolkit_for_applications/8.2/html/using_the_migration_toolkit_for_applications_command-line_interface)
+- [Configuring and using MTA rules](https://docs.redhat.com/en/documentation/migration_toolkit_for_applications/8.2/html/configuring_and_using_rules_for_an_mta_analysis)
+
 ## Automated MTA C# workspace and report
 
 The `mta_dotnet_analyzer` role automates the repeatable preparation and MTA
@@ -295,10 +773,9 @@ The managed workspace marker allows a later run to refresh only the staged
 source directory. The role will not recursively replace an arbitrary existing
 directory.
 
-### Prerequisites
+### Final preflight for this role
 
-Complete the RHEL and MTA CLI installation documented by this repository, then
-verify:
+Complete the server-preparation procedure above, then verify:
 
 ```bash
 ansible-playbook --version
