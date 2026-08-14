@@ -1,0 +1,13 @@
+---
+- name: Prepare and analyze a .NET application with MTA
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    # Override both paths with -e or with an external variables file.
+    mta_dotnet_source_path: "./legacy_project"
+    mta_dotnet_output_dir: "./migration_report/mta-dotnet"
+
+  roles:
+    - mta_dotnet_analyzer

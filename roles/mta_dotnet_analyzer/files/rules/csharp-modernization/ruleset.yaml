@@ -1,0 +1,5 @@
+name: csharp-modernization-readiness
+description: Starter rules for triaging legacy .NET dependencies before modernization.
+labels:
+  - konveyor.io/source=dotnet
+  - konveyor.io/target=cloud-readiness

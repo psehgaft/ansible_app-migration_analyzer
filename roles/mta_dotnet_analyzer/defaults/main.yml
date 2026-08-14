@@ -1,0 +1,32 @@
+---
+mta_dotnet_source_path: "{{ source_code_path | default('/path/to/dotnet/source') }}"
+mta_dotnet_output_dir: "{{ output_dir | default('./output_report') }}/mta-dotnet"
+
+mta_dotnet_workspace_dir: "{{ mta_dotnet_output_dir }}/workspace"
+mta_dotnet_staged_source_dir: "{{ mta_dotnet_workspace_dir }}/source"
+mta_dotnet_manifest_file: "{{ mta_dotnet_workspace_dir }}/analysis-scope.json"
+mta_dotnet_report_dir: "{{ mta_dotnet_output_dir }}/report"
+mta_dotnet_static_report: "{{ mta_dotnet_report_dir }}/static-report/index.html"
+mta_dotnet_rules_dir: "{{ mta_dotnet_workspace_dir }}/rules/csharp-modernization"
+
+mta_cli_binary: "mta-cli"
+mta_dotnet_provider: "csharp"
+mta_dotnet_mode: "source-only"
+mta_dotnet_execute_analysis: true
+mta_dotnet_validate_rules: true
+mta_dotnet_overwrite_report: true
+mta_dotnet_enable_default_rulesets: false
+mta_dotnet_fail_on_vb_only: true
+mta_dotnet_extra_args: []
+
+mta_dotnet_excluded_directories:
+  - .git
+  - .hg
+  - .svn
+  - .vs
+  - bin
+  - obj
+  - node_modules
+  - TestResults
+  - mta-report
+  - mta-workspace
